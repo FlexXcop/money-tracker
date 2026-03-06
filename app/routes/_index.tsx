@@ -1,22 +1,29 @@
-import { data, Form, useActionData, useNavigation } from 'react-router';
+import {
+  data,
+  Form,
+  useActionData,
+  useNavigation,
+} from 'react-router';
 import { appendExpense } from '~/lib/sheets.server';
 
 export async function action() {
   try {
     const row = [
-      new Date().toISOString(),
-      'Danny',
-      'Food',
-      '25000',
-      'Cash',
-      'Test entry from DuitLog',
-      '2025-01-01',
+      '2026-03-07', // Date
+      'Danny', // Payee
+      'Food', // Category
+      '25000', // Amount (IDR)
+      'Cash', // Payment Method
+      'Test entry from DuitLog', // Description
     ];
     await appendExpense(row);
     return data({ success: true, message: 'Test row appended!' });
   } catch {
     return data(
-      { success: false, error: 'Sheets API error — check server logs.' },
+      {
+        success: false,
+        error: 'Sheets API error — check server logs.',
+      },
       { status: 500 },
     );
   }
@@ -39,9 +46,11 @@ export default function Index() {
           {isSubmitting ? 'Appending...' : 'Append Test Row'}
         </button>
       </Form>
-      {actionData && 'message' in actionData && actionData.message && (
-        <p className="text-green-600">{actionData.message}</p>
-      )}
+      {actionData &&
+        'message' in actionData &&
+        actionData.message && (
+          <p className="text-green-600">{actionData.message}</p>
+        )}
       {actionData && 'error' in actionData && actionData.error && (
         <p className="text-red-600">{actionData.error}</p>
       )}

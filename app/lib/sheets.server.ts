@@ -11,7 +11,10 @@ function getSheetsClient() {
     credentials: {
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
       // The private key is stored with literal \n in the env var; replace with real newlines
-      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(
+        /\\n/g,
+        '\n',
+      ),
     },
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
@@ -25,7 +28,7 @@ export async function appendExpense(row: string[]): Promise<void> {
     const sheets = getSheetsClient();
     await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
-      range: `${process.env.GOOGLE_SHEET_NAME}!A:G`,
+      range: `'${process.env.GOOGLE_SHEET_NAME}'!A:F`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [row] },
     });
@@ -37,12 +40,14 @@ export async function appendExpense(row: string[]): Promise<void> {
   }
 }
 
-export async function getRecentExpenses(count = 20): Promise<string[][]> {
+export async function getRecentExpenses(
+  count = 20,
+): Promise<string[][]> {
   try {
     const sheets = getSheetsClient();
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
-      range: `${process.env.GOOGLE_SHEET_NAME}!A:G`,
+      range: `'${process.env.GOOGLE_SHEET_NAME}'!A:F`,
     });
     const values = res.data.values ?? [];
     // Skip header row, take last `count` rows, reverse (newest first)
