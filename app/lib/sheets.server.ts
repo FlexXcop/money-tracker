@@ -23,16 +23,45 @@ function getSheetsClient() {
   return _sheets;
 }
 
-export async function appendExpense(row: string[]): Promise<void> {
+export async function getAvailableMonths(): Promise<string[]> {
+  try {
+    const sheets = getSheetsClient();
+    const res = await sheets.spreadsheets.get({
+      spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
+      fields: 'sheets.properties.title',
+    });
+
+    const titles = (res.data.sheets ?? [])
+      .map((s) => s.properties?.title ?? '')
+      .filter((title) => /^\d{4}-\d{2}$/.test(title));
+
+    titles.sort();
+    titles.reverse();
+
+    log('info', 'sheets_get_months_success', {
+      count: titles.length,
+    });
+    return titles;
+  } catch (err) {
+    const error = err as Error;
+    log('error', 'sheets_get_months_error', { error: error.message });
+    throw err;
+  }
+}
+
+export async function appendExpense(
+  month: string,
+  row: string[],
+): Promise<void> {
   try {
     const sheets = getSheetsClient();
     await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
-      range: `'${process.env.GOOGLE_SHEET_NAME}'!A:G`,
+      range: `'${month}'!A:G`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [row] },
     });
-    log('info', 'sheets_append_success');
+    log('info', 'sheets_append_success', { month });
   } catch (err) {
     const error = err as Error;
     log('error', 'sheets_append_error', { error: error.message });
@@ -40,18 +69,20 @@ export async function appendExpense(row: string[]): Promise<void> {
   }
 }
 
-export async function getRecentExpenses(
-  count = 20,
+export async function getExpensesByMonth(
+  month: string,
+  limit?: number,
 ): Promise<string[][]> {
   try {
     const sheets = getSheetsClient();
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
-      range: `'${process.env.GOOGLE_SHEET_NAME}'!A:G`,
+      range: `'${month}'!A:G`,
     });
     const values = res.data.values ?? [];
-    // Skip header row, take last `count` rows, reverse (newest first)
-    return values.slice(1).slice(-count).reverse() as string[][];
+    const rows = values.slice(1);
+    const bounded = limit ? rows.slice(-limit) : rows;
+    return bounded.reverse() as string[][];
   } catch (err) {
     const error = err as Error;
     log('error', 'sheets_get_error', { error: error.message });
