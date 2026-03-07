@@ -17,7 +17,7 @@ flowchart LR
     A["Phone (PWA)"] -->|Form POST| B["React Router v7\nServer Action"]
     B -->|Validate with Zod| C["Google Sheets API v4"]
     C --> D["Google Spreadsheet\n(Transactions sheet)"]
-    D -->|loader() read| B
+    D -->|loader read| B
     B -->|JSON response| A
 ```
 
