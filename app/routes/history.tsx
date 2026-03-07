@@ -31,7 +31,7 @@ export default function History() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col bg-white">
-      <header className="shrink-0 px-4 pt-6 pb-2">
+      <header className="shrink-0 px-4 pt-[max(1.5rem,env(safe-area-inset-top))] pb-2">
         <h1 className="text-xl font-bold tracking-tight text-slate-900">
           Recent Expenses
         </h1>
