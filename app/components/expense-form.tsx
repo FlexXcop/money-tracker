@@ -2,7 +2,7 @@ import { useReducer, type RefObject } from 'react';
 import { Form } from 'react-router';
 import { endOfMonth, format } from 'date-fns';
 import { CalendarIcon } from 'lucide-react';
-import { CATEGORIES, METHODS } from '~/lib/constants';
+import { CATEGORIES, METHODS, SOURCES } from '~/lib/constants';
 import { Calendar } from '~/components/ui/calendar';
 import {
   Popover,
@@ -16,6 +16,7 @@ interface ExpenseFormProps {
   isSubmitting?: boolean;
   amountRef?: RefObject<HTMLInputElement | null>;
   selectedMonth?: string;
+  defaultSource?: string;
 }
 
 function toDateString(d: Date) {
@@ -57,6 +58,7 @@ export function ExpenseForm({
   isSubmitting,
   amountRef,
   selectedMonth,
+  defaultSource,
 }: ExpenseFormProps) {
   const [state, dispatch] = useReducer(reducer, {
     date: new Date(),
@@ -222,22 +224,29 @@ export function ExpenseForm({
         )}
       </fieldset>
 
-      {/* Description */}
+      {/* Source */}
       <fieldset>
         <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-          Description
+          Paid from
         </label>
-        <input
-          type="text"
-          name="description"
-          placeholder="Add a description (optional)"
-          maxLength={200}
-          className="w-full rounded-lg border-2 border-slate-200 px-4 py-3 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-slate-900"
-        />
-        {errors?.description && (
-          <p className="mt-1 text-xs text-red-500">
-            {errors.description}
-          </p>
+        <div className="grid grid-cols-3 gap-2">
+          {SOURCES.map((s) => (
+            <label key={s} className="cursor-pointer">
+              <input
+                type="radio"
+                name="source"
+                value={s}
+                defaultChecked={s === (defaultSource ?? 'Danny')}
+                className="peer sr-only"
+              />
+              <div className="rounded-lg bg-slate-100 py-2 text-center text-xs font-medium text-slate-600 transition-colors peer-checked:bg-slate-900 peer-checked:text-white">
+                {s}
+              </div>
+            </label>
+          ))}
+        </div>
+        {errors?.source && (
+          <p className="mt-1 text-xs text-red-500">{errors.source}</p>
         )}
       </fieldset>
 

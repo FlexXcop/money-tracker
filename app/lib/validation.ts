@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CATEGORIES, METHODS } from './constants';
+import { CATEGORIES, METHODS, SOURCES } from './constants';
 
 export const expenseSchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Invalid month'),
@@ -12,11 +12,7 @@ export const expenseSchema = z.object({
     .pipe(z.number().positive('Amount must be positive')),
   category: z.enum(CATEGORIES, { message: 'Pick a category' }),
   method: z.enum(METHODS, { message: 'Pick a payment method' }),
-  description: z
-    .string()
-    .max(200, 'Description too long')
-    .optional()
-    .default('')
+  source: z.enum(SOURCES, { errorMap: () => ({ message: 'Select a source' }) })
 });
 
 export type ExpenseInput = z.input<typeof expenseSchema>;

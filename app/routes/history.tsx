@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   data,
   useLoaderData,
@@ -37,7 +38,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       amount: Number(row[3]) || 0,
       method: row[4] ?? '',
       date: row[5] ?? '',
-      note: row[6] ?? '',
+      source: row[6] ?? '',
     }));
     return data({ entries, activeMonth, months });
   } catch {
@@ -58,10 +59,16 @@ export default function History() {
   const activeMonth = loaderData.activeMonth as string;
   const months = loaderData.months as string[];
   const navigate = useNavigate();
+  const [sourceFilter, setSourceFilter] = useState<string>('All');
 
   function handleMonthChange(month: string) {
     navigate(`/history?month=${month}`);
   }
+
+  const filtered =
+    sourceFilter === 'All'
+      ? entries
+      : entries.filter((e) => e.source === sourceFilter);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col bg-white">
@@ -78,9 +85,25 @@ export default function History() {
         </div>
       </header>
 
+      <div className="grid grid-cols-4 gap-1 px-4 pb-2">
+        {['All', 'Danny', 'Dewi', 'Together'].map((s) => (
+          <button
+            key={s}
+            onClick={() => setSourceFilter(s)}
+            className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
+              sourceFilter === s
+                ? 'bg-slate-900 text-white'
+                : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+
       {error && <p className="px-4 text-sm text-red-600">{error}</p>}
 
-      {entries.length === 0 && !error ? (
+      {filtered.length === 0 && !error ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
           <span className="text-5xl">🧾</span>
           <p className="text-lg font-semibold text-slate-700">
@@ -92,7 +115,7 @@ export default function History() {
         </div>
       ) : (
         <div className="flex flex-col gap-2 px-4 pt-2 pb-4">
-          {entries.map((entry, i) => (
+          {filtered.map((entry, i) => (
             <ExpenseCard
               key={`${entry.timestamp}-${i}`}
               entry={entry}

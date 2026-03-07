@@ -5,5 +5,5 @@ export interface ExpenseEntry {
   amount: number;
   method: string;
   date: string;
-  note: string;
+  source: string;
 }

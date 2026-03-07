@@ -5,7 +5,7 @@ export const selectedMonthCookie = createCookie('selected_month', {
   path: '/',
   sameSite: 'lax',
   secure: process.env.NODE_ENV === 'production',
-  httpOnly: true,
+  httpOnly: true
 });
 
 export const selectedUserCookie = createCookie('selected_user', {
@@ -13,5 +13,13 @@ export const selectedUserCookie = createCookie('selected_user', {
   path: '/',
   sameSite: 'lax',
   secure: process.env.NODE_ENV === 'production',
-  httpOnly: true,
+  httpOnly: true
+});
+
+export const selectedSourceCookie = createCookie('selected_source', {
+  maxAge: 60 * 60 * 24 * 90,
+  path: '/',
+  sameSite: 'lax',
+  secure: process.env.NODE_ENV === 'production',
+  httpOnly: true
 });

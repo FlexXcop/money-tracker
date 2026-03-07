@@ -21,7 +21,7 @@ import { requireAuth } from '~/lib/auth.server';
 import { resolveActiveMonth } from '~/lib/month.server';
 import {
   selectedMonthCookie,
-  selectedUserCookie,
+  selectedSourceCookie,
 } from '~/lib/cookies.server';
 
 function formatMonthLabel(month: string): string {
@@ -41,7 +41,7 @@ type ActionData =
         amount: number;
         method: string;
         date: string;
-        description: string;
+        source: string;
         month: string;
       };
     }
@@ -53,7 +53,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const cookieHeader = request.headers.get('Cookie');
   const cookieMonth = await selectedMonthCookie.parse(cookieHeader);
-  const cookieUser = await selectedUserCookie.parse(cookieHeader);
+  const cookieSource = await selectedSourceCookie.parse(cookieHeader);
 
   const { months, activeMonth } =
     await resolveActiveMonth(cookieMonth);
@@ -61,6 +61,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return data({
     months,
     activeMonth,
+    defaultSource: cookieSource ?? 'Danny',
   });
 }
 
@@ -74,7 +75,7 @@ export async function action({ request }: Route.ActionArgs) {
     amount: formData.get('amount') as string,
     category: formData.get('category') as string,
     method: formData.get('method') as string,
-    description: formData.get('description') as string,
+    source: formData.get('source') as string,
   };
 
   const result = expenseSchema.safeParse(raw);
@@ -120,7 +121,7 @@ export async function action({ request }: Route.ActionArgs) {
     String(parsed.amount), // Amount (IDR)
     parsed.method, // Payment Method
     formattedDate, // Date
-    parsed.description, // Description
+    parsed.source, // Source
   ];
 
   try {
@@ -129,6 +130,10 @@ export async function action({ request }: Route.ActionArgs) {
     headers.append(
       'Set-Cookie',
       await selectedMonthCookie.serialize(parsed.month),
+    );
+    headers.append(
+      'Set-Cookie',
+      await selectedSourceCookie.serialize(parsed.source),
     );
     return data(
       {
@@ -139,7 +144,7 @@ export async function action({ request }: Route.ActionArgs) {
           amount: parsed.amount,
           method: parsed.method,
           date: parsed.date,
-          description: parsed.description,
+          source: parsed.source,
           month: parsed.month,
         },
       },
@@ -160,7 +165,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Index() {
-  const { months, activeMonth } = useLoaderData<typeof loader>();
+  const { months, activeMonth, defaultSource } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>() as
     | ActionData
     | undefined;
@@ -217,6 +222,7 @@ export default function Index() {
         isSubmitting={isSubmitting}
         amountRef={amountRef}
         selectedMonth={selectedMonth}
+        defaultSource={defaultSource}
       />
     </main>
   );
