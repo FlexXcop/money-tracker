@@ -42,6 +42,7 @@ export default function Login() {
             id="passcode"
             name="passcode"
             placeholder="Enter passcode"
+            inputMode="numeric"
             autoFocus
             required
             className="w-full rounded-lg border border-slate-500 px-4 py-3 text-center text-lg tracking-widest text-slate-900 placeholder:text-slate-500 focus:border-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-700"
