@@ -5,4 +5,5 @@ export default [
   route('history', 'routes/history.tsx'),
   route('login', 'routes/login.tsx'),
   route('offline', 'routes/offline.tsx'),
+  route('api/sync', 'routes/api.sync.tsx'),
 ] satisfies RouteConfig;

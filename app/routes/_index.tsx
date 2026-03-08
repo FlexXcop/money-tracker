@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   data,
   useActionData,
@@ -18,11 +18,17 @@ import { MonthSelector } from '~/components/month-selector';
 import { log } from '~/lib/logger.server';
 import { toast } from 'sonner';
 import { requireAuth } from '~/lib/auth.server';
-import { resolveActiveMonth } from '~/lib/month.server';
+import { resolveActiveMonth, isNetworkError } from '~/lib/month.server';
 import {
   selectedMonthCookie,
   selectedSourceCookie,
 } from '~/lib/cookies.server';
+import {
+  addPendingExpense,
+  getPendingCount,
+  registerBackgroundSync,
+} from '~/lib/offline-queue';
+import { syncPendingExpenses } from '~/lib/sync';
 
 function formatMonthLabel(month: string): string {
   const date = new Date(month + '-01');
@@ -46,7 +52,20 @@ type ActionData =
       };
     }
   | { success: false; errors: Record<string, string> }
-  | { success: false; error: string };
+  | { success: false; error: string }
+  | {
+      success: false;
+      networkError: true;
+      pendingData: {
+        month: string;
+        item: string;
+        date: string;
+        amount: number;
+        category: string;
+        method: string;
+        source: string;
+      };
+    };
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireAuth(request);
@@ -55,8 +74,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const cookieMonth = await selectedMonthCookie.parse(cookieHeader);
   const cookieSource = await selectedSourceCookie.parse(cookieHeader);
 
-  const { months, activeMonth } =
-    await resolveActiveMonth(cookieMonth);
+  const { months, activeMonth } = await resolveActiveMonth(cookieMonth);
 
   return data({
     months,
@@ -93,16 +111,21 @@ export async function action({ request }: Route.ActionArgs) {
 
   const parsed = result.data;
 
-  // Verify the target month tab exists
-  const availableMonths = await getAvailableMonths();
-  if (!availableMonths.includes(parsed.month)) {
-    return data({
-      success: false as const,
-      error:
-        "Sheet tab '" +
-        parsed.month +
-        "' not found. Please create it in the spreadsheet.",
-    });
+  // Verify the target month tab exists (skip when offline — appendExpense will fail gracefully)
+  try {
+    const availableMonths = await getAvailableMonths();
+    if (!availableMonths.includes(parsed.month)) {
+      return data({
+        success: false as const,
+        error:
+          "Sheet tab '" +
+          parsed.month +
+          "' not found. Please create it in the spreadsheet.",
+      });
+    }
+  } catch (err) {
+    if (!isNetworkError(err)) throw err;
+    // Offline — skip verification and let appendExpense attempt (and fail) below
   }
 
   const now = new Date();
@@ -151,6 +174,21 @@ export async function action({ request }: Route.ActionArgs) {
       { headers },
     );
   } catch (err) {
+    if (isNetworkError(err)) {
+      return data({
+        success: false as const,
+        networkError: true as const,
+        pendingData: {
+          month: parsed.month,
+          item: parsed.item,
+          date: parsed.date,
+          amount: parsed.amount,
+          category: parsed.category,
+          method: parsed.method,
+          source: parsed.source,
+        },
+      });
+    }
     log('error', 'action_append_error', {
       error: (err as Error).message,
     });
@@ -165,7 +203,8 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Index() {
-  const { months, activeMonth, defaultSource } = useLoaderData<typeof loader>();
+  const { months, activeMonth, defaultSource } =
+    useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>() as
     | ActionData
     | undefined;
@@ -175,7 +214,87 @@ export default function Index() {
 
   const [selectedMonth, setSelectedMonth] = useState(activeMonth);
   const [formKey, setFormKey] = useState(0);
+  const [isOnline, setIsOnline] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
 
+  // Track online/offline status
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Load pending count on mount
+  const refreshPendingCount = useCallback(async () => {
+    try {
+      const count = await getPendingCount();
+      setPendingCount(count);
+    } catch {
+      // IndexedDB not available
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshPendingCount();
+  }, [refreshPendingCount]);
+
+  // Auto-sync when coming back online
+  // Skip when SyncManager is available — the SW Background Sync owns it then,
+  // preventing concurrent submissions of the same queued entry.
+  useEffect(() => {
+    if (!isOnline || pendingCount === 0 || isSyncing) return;
+    if (typeof window !== 'undefined' && 'SyncManager' in window)
+      return;
+
+    setIsSyncing(true);
+    syncPendingExpenses((synced, total) => {
+      setPendingCount(total - synced);
+    })
+      .then(({ synced, failed }) => {
+        refreshPendingCount();
+        if (synced > 0) {
+          toast.success(
+            `Synced ${synced} expense${synced > 1 ? 's' : ''} to Google Sheets${failed > 0 ? ` (${failed} failed)` : ''}`,
+          );
+        }
+      })
+      .catch((error) => {
+        // Ensure the user is informed when background sync fails
+        console.error('Failed to sync pending expenses', error);
+        toast.error(
+          'Failed to sync pending expenses. They will be retried automatically when possible.',
+        );
+      })
+      .finally(() => {
+        setIsSyncing(false);
+      });
+  }, [isOnline, pendingCount, isSyncing, refreshPendingCount]);
+
+  // Listen for SW sync-complete message
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === 'SYNC_COMPLETE') {
+        refreshPendingCount();
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () =>
+      navigator.serviceWorker.removeEventListener('message', handler);
+  }, [refreshPendingCount]);
+
+  // Handle action response
   useEffect(() => {
     if (!actionData) return;
 
@@ -192,10 +311,80 @@ export default function Index() {
       }
       setFormKey((k) => k + 1);
       setTimeout(() => amountRef.current?.focus(), 100);
+    } else if ('networkError' in actionData && actionData.networkError) {
+      // Server couldn't reach Sheets — fall back to offline queue
+      const fd = new FormData();
+      Object.entries(actionData.pendingData).forEach(([k, v]) =>
+        fd.set(k, String(v)),
+      );
+      handleOfflineSubmit(fd);
     } else if ('error' in actionData && actionData.error) {
       toast.error(actionData.error);
     }
   }, [actionData]);
+
+  function generateOfflineId(): string {
+    // Prefer native crypto.randomUUID when available, fall back to timestamp+random
+    if (
+      typeof crypto !== 'undefined' &&
+      typeof crypto.randomUUID === 'function'
+    ) {
+      return crypto.randomUUID();
+    }
+
+    return (
+      'offline-' +
+      Date.now().toString(36) +
+      '-' +
+      Math.random().toString(36).slice(2)
+    );
+  }
+
+  // Handle offline form submission
+  async function handleOfflineSubmit(formData: FormData) {
+    const expense = {
+      id: generateOfflineId(),
+      createdAt: new Date().toISOString(),
+      formData: {
+        month: formData.get('month') as string,
+        item: formData.get('item') as string,
+        date: formData.get('date') as string,
+        amount: formData.get('amount') as string,
+        category: formData.get('category') as string,
+        method: formData.get('method') as string,
+        source: formData.get('source') as string,
+      },
+    };
+
+    try {
+      await addPendingExpense(expense);
+      await registerBackgroundSync();
+      await refreshPendingCount();
+
+      toast('Saved offline — will sync when connected', {
+        style: {
+          backgroundColor: '#fffbeb',
+          color: '#92400e',
+          border: '1px solid #fde68a',
+        },
+      });
+
+      if (
+        typeof navigator !== 'undefined' &&
+        typeof navigator.vibrate === 'function'
+      ) {
+        navigator.vibrate(50);
+      }
+
+      setFormKey((k) => k + 1);
+      setTimeout(() => amountRef.current?.focus(), 100);
+    } catch (error) {
+      console.error('Failed to save expense offline', error);
+      toast.error(
+        'Could not save expense for offline use. Please try again or submit when back online.',
+      );
+    }
+  }
 
   const errors =
     actionData && !actionData.success && 'errors' in actionData
@@ -216,6 +405,27 @@ export default function Index() {
           />
         </div>
       </header>
+
+      {/* Offline banner */}
+      {!isOnline && (
+        <div className="mx-4 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-800">
+          You're offline — expenses will be saved locally and synced
+          when you reconnect.
+        </div>
+      )}
+
+      {/* Pending sync badge */}
+      {pendingCount > 0 && (
+        <div className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-center text-sm text-blue-800">
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-xs font-bold text-white">
+            {pendingCount}
+          </span>
+          {isSyncing
+            ? 'Syncing...'
+            : `pending expense${pendingCount > 1 ? 's' : ''}`}
+        </div>
+      )}
+
       <ExpenseForm
         key={formKey}
         errors={errors}
@@ -223,6 +433,8 @@ export default function Index() {
         amountRef={amountRef}
         selectedMonth={selectedMonth}
         defaultSource={defaultSource}
+        isOnline={isOnline}
+        onOfflineSubmit={handleOfflineSubmit}
       />
     </main>
   );

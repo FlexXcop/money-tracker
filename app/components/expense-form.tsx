@@ -1,4 +1,5 @@
-import { useReducer, type RefObject } from 'react';
+import React, { useReducer, type RefObject } from 'react';
+import { toast } from 'sonner';
 import { Form } from 'react-router';
 import { endOfMonth, format } from 'date-fns';
 import { CalendarIcon } from 'lucide-react';
@@ -17,6 +18,8 @@ interface ExpenseFormProps {
   amountRef?: RefObject<HTMLInputElement | null>;
   selectedMonth?: string;
   defaultSource?: string;
+  isOnline?: boolean;
+  onOfflineSubmit?: (formData: FormData) => Promise<void>;
 }
 
 function toDateString(d: Date) {
@@ -59,6 +62,8 @@ export function ExpenseForm({
   amountRef,
   selectedMonth,
   defaultSource,
+  isOnline = true,
+  onOfflineSubmit,
 }: ExpenseFormProps) {
   const [state, dispatch] = useReducer(reducer, {
     date: new Date(),
@@ -70,8 +75,48 @@ export function ExpenseForm({
     ? endOfMonth(new Date(selectedMonth + '-01'))
     : undefined;
 
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    if (isOnline) return; // Let RR7 handle it normally
+
+    e.preventDefault();
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+
+    // Basic client-side validation for offline entries
+    const amount = formData.get('amount') as string;
+    const category = formData.get('category') as string;
+    const method = formData.get('method') as string;
+    const source = formData.get('source') as string;
+    const item = formData.get('item') as string;
+    const date = formData.get('date') as string;
+
+    if (
+      !amount ||
+      !category ||
+      !method ||
+      !source ||
+      !item ||
+      !date
+    ) {
+      toast.error('Please fill in all required fields.');
+      return;
+    }
+
+    const numAmount = Number(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      toast.error('Amount must be a positive number.');
+      return;
+    }
+
+    onOfflineSubmit?.(formData);
+  }
+
   return (
-    <Form method="post" className="flex flex-col gap-4 p-4">
+    <Form
+      method="post"
+      className="flex flex-col gap-4 p-4"
+      onSubmit={handleSubmit}
+    >
       {selectedMonth && (
         <input type="hidden" name="month" value={selectedMonth} />
       )}
@@ -279,8 +324,10 @@ export function ExpenseForm({
             </svg>
             Saving...
           </span>
-        ) : (
+        ) : isOnline ? (
           'Save Expense'
+        ) : (
+          'Save Offline'
         )}
       </button>
     </Form>
