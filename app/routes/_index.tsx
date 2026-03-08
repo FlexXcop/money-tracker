@@ -54,48 +54,6 @@ type ActionData =
   | { success: false; errors: Record<string, string> }
   | { success: false; error: string };
 
-function buildFallbackMonths(cookieMonth?: string): string[] {
-  const now = new Date();
-  const jakartaDate = new Date(
-    now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }),
-  );
-  const months: string[] = [];
-  for (let i = 0; i < 3; i++) {
-    const d = new Date(
-      jakartaDate.getFullYear(),
-      jakartaDate.getMonth() - i,
-      1,
-    );
-    months.push(
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-    );
-  }
-  if (cookieMonth && !months.includes(cookieMonth)) {
-    months.push(cookieMonth);
-    months.sort().reverse();
-  }
-  return months;
-}
-
-function isNetworkError(err: unknown): boolean {
-  if (err instanceof Error) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (
-      code === 'ENOTFOUND' ||
-      code === 'ECONNREFUSED' ||
-      code === 'ETIMEDOUT' ||
-      code === 'ECONNRESET'
-    )
-      return true;
-    if (
-      err.message.includes('ENOTFOUND') ||
-      err.message.includes('getaddrinfo')
-    )
-      return true;
-  }
-  return false;
-}
-
 export async function loader({ request }: Route.LoaderArgs) {
   await requireAuth(request);
 
@@ -103,19 +61,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const cookieMonth = await selectedMonthCookie.parse(cookieHeader);
   const cookieSource = await selectedSourceCookie.parse(cookieHeader);
 
-  let months: string[];
-  let activeMonth: string;
-
-  try {
-    ({ months, activeMonth } = await resolveActiveMonth(cookieMonth));
-  } catch (err) {
-    if (!isNetworkError(err)) throw err;
-    months = buildFallbackMonths(cookieMonth);
-    activeMonth =
-      cookieMonth && months.includes(cookieMonth)
-        ? cookieMonth
-        : months[0];
-  }
+  const { months, activeMonth } = await resolveActiveMonth(cookieMonth);
 
   return data({
     months,

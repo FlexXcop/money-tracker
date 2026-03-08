@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useReducer, useEffect, useCallback } from 'react';
 import {
   data,
   useLoaderData,
@@ -27,9 +27,18 @@ export async function loader({ request }: Route.LoaderArgs) {
     request.headers.get('Cookie'),
   );
 
-  const { months, activeMonth } = await resolveActiveMonth(
+  const { months, activeMonth, offline } = await resolveActiveMonth(
     monthParam ?? cookieMonth,
   );
+
+  if (offline) {
+    return data({
+      entries: [] as ExpenseEntry[],
+      activeMonth,
+      months,
+      offline: true,
+    });
+  }
 
   try {
     const LIMIT = 20;
@@ -58,30 +67,62 @@ export default function History() {
   const loaderData = useLoaderData<typeof loader>();
   const error =
     'error' in loaderData ? (loaderData.error as string) : null;
+  const isOffline =
+    'offline' in loaderData ? (loaderData.offline as boolean) : false;
   const entries = loaderData.entries as ExpenseEntry[];
   const activeMonth = loaderData.activeMonth as string;
   const months = loaderData.months as string[];
   const navigate = useNavigate();
-  const [sourceFilter, setSourceFilter] = useState<string>('All');
-  const [pendingCount, setPendingCount] = useState(0);
-  const [isOnline, setIsOnline] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false);
+
+  type State = {
+    sourceFilter: string;
+    pendingCount: number;
+    isOnline: boolean;
+    isSyncing: boolean;
+    cachedEntries: ExpenseEntry[];
+  };
+  type Action =
+    | { type: 'SET_SOURCE_FILTER'; filter: string }
+    | { type: 'SET_PENDING_COUNT'; count: number }
+    | { type: 'SET_ONLINE'; online: boolean }
+    | { type: 'SET_SYNCING'; syncing: boolean }
+    | { type: 'SET_CACHED_ENTRIES'; entries: ExpenseEntry[] };
+
+  const [state, dispatch] = useReducer(
+    (s: State, a: Action): State => {
+      switch (a.type) {
+        case 'SET_SOURCE_FILTER': return { ...s, sourceFilter: a.filter };
+        case 'SET_PENDING_COUNT': return { ...s, pendingCount: a.count };
+        case 'SET_ONLINE': return { ...s, isOnline: a.online };
+        case 'SET_SYNCING': return { ...s, isSyncing: a.syncing };
+        case 'SET_CACHED_ENTRIES': return { ...s, cachedEntries: a.entries };
+      }
+    },
+    {
+      sourceFilter: 'All',
+      pendingCount: 0,
+      isOnline: true,
+      isSyncing: false,
+      cachedEntries: [],
+    },
+  );
+  const { sourceFilter, pendingCount, isOnline, isSyncing, cachedEntries } = state;
 
   const refreshPendingCount = useCallback(async () => {
     try {
       const count = await getPendingCount();
-      setPendingCount(count);
+      dispatch({ type: 'SET_PENDING_COUNT', count });
     } catch {
       // IndexedDB not available
     }
   }, []);
 
   useEffect(() => {
-    setIsOnline(navigator.onLine);
+    dispatch({ type: 'SET_ONLINE', online: navigator.onLine });
     refreshPendingCount();
 
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    const handleOnline = () => dispatch({ type: 'SET_ONLINE', online: true });
+    const handleOffline = () => dispatch({ type: 'SET_ONLINE', online: false });
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -91,13 +132,39 @@ export default function History() {
     };
   }, [refreshPendingCount]);
 
+  // Persist entries to localStorage when loaded successfully
+  useEffect(() => {
+    if (isOffline || entries.length === 0) return;
+    try {
+      localStorage.setItem(
+        `duitlog-history-${activeMonth}`,
+        JSON.stringify(entries),
+      );
+    } catch {
+      // Storage quota exceeded or unavailable
+    }
+  }, [entries, activeMonth, isOffline]);
+
+  // Load cached entries from localStorage when offline
+  useEffect(() => {
+    if (!isOffline) return;
+    try {
+      const cached = localStorage.getItem(`duitlog-history-${activeMonth}`);
+      if (cached) {
+        dispatch({ type: 'SET_CACHED_ENTRIES', entries: JSON.parse(cached) });
+      }
+    } catch {
+      // localStorage unavailable
+    }
+  }, [isOffline, activeMonth]);
+
   // Auto-sync when online with pending entries
   useEffect(() => {
     if (!isOnline || pendingCount === 0 || isSyncing) return;
 
-    setIsSyncing(true);
+    dispatch({ type: 'SET_SYNCING', syncing: true });
     syncPendingExpenses((synced, total) => {
-      setPendingCount(total - synced);
+      dispatch({ type: 'SET_PENDING_COUNT', count: total - synced });
     })
       .then(({ synced, failed }) => {
         refreshPendingCount();
@@ -108,12 +175,11 @@ export default function History() {
         }
       })
       .catch((error) => {
-        // Ensure errors don't leave syncing state stuck
         console.error('Failed to sync pending expenses', error);
         toast.error('Failed to sync pending expenses. Please try again.');
       })
       .finally(() => {
-        setIsSyncing(false);
+        dispatch({ type: 'SET_SYNCING', syncing: false });
       });
   }, [isOnline, pendingCount, isSyncing, refreshPendingCount]);
 
@@ -121,10 +187,12 @@ export default function History() {
     navigate(`/history?month=${month}`);
   }
 
+  const displayEntries = isOffline && cachedEntries.length > 0 ? cachedEntries : entries;
+  const isShowingCached = isOffline && cachedEntries.length > 0;
   const filtered =
     sourceFilter === 'All'
-      ? entries
-      : entries.filter((e) => e.source === sourceFilter);
+      ? displayEntries
+      : displayEntries.filter((e) => e.source === sourceFilter);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col bg-white">
@@ -141,6 +209,14 @@ export default function History() {
         </div>
       </header>
 
+      {isOffline && (
+        <div className="mx-4 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-800">
+          {isShowingCached
+            ? "You're offline — showing last loaded data."
+            : "You're offline — history unavailable until reconnected."}
+        </div>
+      )}
+
       {pendingCount > 0 && (
         <div className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-center text-sm text-blue-800">
           <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-xs font-bold text-white">
@@ -154,7 +230,7 @@ export default function History() {
         {['All', 'Danny', 'Dewi', 'Together'].map((s) => (
           <button
             key={s}
-            onClick={() => setSourceFilter(s)}
+            onClick={() => dispatch({ type: 'SET_SOURCE_FILTER', filter: s })}
             className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
               sourceFilter === s
                 ? 'bg-slate-900 text-white'
@@ -172,10 +248,12 @@ export default function History() {
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
           <span className="text-5xl">🧾</span>
           <p className="text-lg font-semibold text-slate-700">
-            No expenses yet
+            {isOffline ? 'No cached history for this month' : 'No expenses yet'}
           </p>
           <p className="text-sm text-slate-400">
-            Start logging your expenses from the Add tab.
+            {isOffline
+              ? 'Visit this month while online to cache it.'
+              : 'Start logging your expenses from the Add tab.'}
           </p>
         </div>
       ) : (
