@@ -2,7 +2,7 @@
 
 | Version | Date       | Author | Change Description |
 | ------- | ---------- | ------ | ------------------ |
-| 2       | 2025-03-09 | Danny  | Saas Plan          |
+| 2       | 2025-03-09 | Danny  | SaaS Plan          |
 
 ## Problem Statement
 
@@ -22,7 +22,7 @@ To serve multiple users, DuitLog needs real authentication, per-user configurati
 ## Non-Goals (SaaS v1)
 
 - Billing / paid tiers (free for now, evaluate later).
-- Shared household accounts (each user has their own sheet; couples can share a Google Sheet manually outside the app).
+- Shared household accounts or multi-user → one-spreadsheet setups (each account connects to and manages its own sheet; any Google Sheets sharing/collaboration happens outside the app and is not recognized as a shared account in v1).
 - Admin dashboard or usage analytics.
 - White-labeling or custom domains.
 - Data export beyond Google Sheets (the sheet IS the export).
@@ -40,15 +40,14 @@ To serve multiple users, DuitLog needs real authentication, per-user configurati
 ### J1: Sign Up & Onboarding (First-time)
 
 1. Land on DuitLog homepage → "Sign in with Google".
-2. Clerk handles Google OAuth, including requesting Sheets API permissions.
+2. Clerk handles Google OAuth, requesting Google Sheets API permissions plus the minimal Google Drive scopes needed to create spreadsheets and let the user pick an existing spreadsheet from Drive (via the Google Picker or equivalent).
 3. On first login, redirected to onboarding wizard:
    - **Step 1 — Spreadsheet**: Choose "Create a new spreadsheet" (auto-setup) or "Connect an existing spreadsheet" (paste URL or pick from Drive).
    - **Step 2 — Sources**: Define money sources (e.g., "Me", "Wife", "Joint"). Starts with sensible defaults, user can add/remove/rename.
    - **Step 3 — Categories**: Define expense categories. Starts with defaults (Food, Transport, etc.), user can customize.
    - **Step 4 — Payment Methods**: Define payment methods. Starts with defaults, user can customize.
 4. App saves config to database.
-5. If "Create new" was chosen: app creates a Google Spreadsheet in the user's Drive, adds the current month's tab with the canonical header row (see [Spreadsheet Schema](#spreadsheet-schema)).
-   - If "Connect existing" was chosen: app validates row 1 of the active tab matches the canonical header row; surfaces an error if incompatible.
+5. If "Create new" was chosen: app creates a Google Spreadsheet in the user's Drive, adds the current month's tab with header row.
 6. Redirected to the main expense form — ready to use.
 
 ### J2: Log an Expense (Existing User)
@@ -76,17 +75,17 @@ Same as current implementation — entries queue in IndexedDB, sync when back on
 
 ### SaaS MVP
 
-| Feature                                                           | Priority |
-| ----------------------------------------------------------------- | -------- |
-| Clerk auth with Google OAuth (including Sheets API scope)         | P0       |
-| Database for user profiles and config (Vercel Postgres + Drizzle) | P0       |
-| Onboarding wizard (spreadsheet + sources + categories + methods)  | P0       |
-| Per-user Sheets API calls using OAuth token from Clerk            | P0       |
-| Auto-create spreadsheet in user's Drive (onboarding option)       | P0       |
-| Customizable sources, categories, payment methods per user        | P0       |
-| Settings page (edit config, view spreadsheet, sign out)           | P1       |
-| Landing page (marketing, sign-in CTA)                             | P1       |
-| Migrate existing personal data (Danny's setup)                    | P1       |
+| Feature                                                          | Priority |
+| ---------------------------------------------------------------- | -------- |
+| Google OAuth-based authentication (including Sheets API scope)   | P0       |
+| Relational database for user profiles and configuration          | P0       |
+| Onboarding wizard (spreadsheet + sources + categories + methods) | P0       |
+| Per-user Sheets API calls using OAuth token from the auth system | P0       |
+| Auto-create spreadsheet in user's Drive (onboarding option)      | P0       |
+| Customizable sources, categories, payment methods per user       | P0       |
+| Settings page (edit config, view spreadsheet, sign out)          | P1       |
+| Landing page (marketing, sign-in CTA)                            | P1       |
+| Migrate existing personal data (Danny's setup)                   | P1       |
 
 ### Future
 
@@ -105,19 +104,3 @@ Everything from the personal version still applies (mobile-first, one-hand, nume
 - **Onboarding must be completable in under 2 minutes** — most users should tap through defaults without changing anything.
 - **Settings changes take effect immediately** — no "save and restart" flow.
 - **The expense form must not feel slower** despite loading config from a database. Config should be cached or loaded in the route loader efficiently.
-
-## Spreadsheet Schema
-
-Every monthly tab (named `YYYY-MM`, e.g. `2026-03`) must have **row 1** as a frozen header with the following columns in exact order:
-
-| Column | Header        | Type   | Description                                      |
-| ------ | ------------- | ------ | ------------------------------------------------ |
-| A      | `timestamp`   | string | ISO 8601 datetime the entry was submitted        |
-| B      | `item`        | string | Human-readable description of the expense        |
-| C      | `category`    | string | Expense category (from user's configured list)   |
-| D      | `amount`      | number | Expense amount (no currency symbol)              |
-| E      | `method`      | string | Payment method (from user's configured list)     |
-| F      | `date`        | string | Date of the expense (`YYYY-MM-DD`)               |
-| G      | `source`      | string | Who paid / money source (from user's config)     |
-
-This schema is canonical and matches `ExpenseEntry` in `app/lib/types.ts`. Any existing spreadsheet connected during onboarding must conform to this header row; the app will reject (and surface an error for) sheets with a different column order or missing columns.
