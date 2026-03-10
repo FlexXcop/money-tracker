@@ -2,7 +2,7 @@
 
 | Version | Date       | Author | Change Description |
 | ------- | ---------- | ------ | ------------------ |
-| 2       | 2025-03-09 | Danny  | Saas Plan          |
+| 2       | 2025-03-09 | Danny  | SaaS Plan          |
 
 ## Problem Statement
 
