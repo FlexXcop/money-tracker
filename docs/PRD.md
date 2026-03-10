@@ -47,7 +47,8 @@ To serve multiple users, DuitLog needs real authentication, per-user configurati
    - **Step 3 — Categories**: Define expense categories. Starts with defaults (Food, Transport, etc.), user can customize.
    - **Step 4 — Payment Methods**: Define payment methods. Starts with defaults, user can customize.
 4. App saves config to database.
-5. If "Create new" was chosen: app creates a Google Spreadsheet in the user's Drive, adds the current month's tab with header row.
+5. If "Create new" was chosen: app creates a Google Spreadsheet in the user's Drive, adds the current month's tab with the canonical header row (see [Spreadsheet Schema](#spreadsheet-schema)).
+   - If "Connect existing" was chosen: app validates row 1 of the active tab matches the canonical header row; surfaces an error if incompatible.
 6. Redirected to the main expense form — ready to use.
 
 ### J2: Log an Expense (Existing User)
@@ -104,3 +105,19 @@ Everything from the personal version still applies (mobile-first, one-hand, nume
 - **Onboarding must be completable in under 2 minutes** — most users should tap through defaults without changing anything.
 - **Settings changes take effect immediately** — no "save and restart" flow.
 - **The expense form must not feel slower** despite loading config from a database. Config should be cached or loaded in the route loader efficiently.
+
+## Spreadsheet Schema
+
+Every monthly tab (named `YYYY-MM`, e.g. `2026-03`) must have **row 1** as a frozen header with the following columns in exact order:
+
+| Column | Header        | Type   | Description                                      |
+| ------ | ------------- | ------ | ------------------------------------------------ |
+| A      | `timestamp`   | string | ISO 8601 datetime the entry was submitted        |
+| B      | `item`        | string | Human-readable description of the expense        |
+| C      | `category`    | string | Expense category (from user's configured list)   |
+| D      | `amount`      | number | Expense amount (no currency symbol)              |
+| E      | `method`      | string | Payment method (from user's configured list)     |
+| F      | `date`        | string | Date of the expense (`YYYY-MM-DD`)               |
+| G      | `source`      | string | Who paid / money source (from user's config)     |
+
+This schema is canonical and matches `ExpenseEntry` in `app/lib/types.ts`. Any existing spreadsheet connected during onboarding must conform to this header row; the app will reject (and surface an error for) sheets with a different column order or missing columns.
