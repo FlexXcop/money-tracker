@@ -10,6 +10,8 @@
 
 DuitLog is a mobile-first Progressive Web App for logging daily expenses in under 10 seconds. It uses Google Sheets as the single source of truth — the app is purely a fast input surface, while all analysis (pivots, charts, dashboards) lives in Sheets. Designed for couples who want a shared, no-fuss expense tracker they can launch from the phone home screen.
 
+> **Note:** This app was originally built for my wife and me to track our daily expenses together. Because of that, some values are hardcoded to fit our specific needs — things like expense sources (`Danny`, `Dewi`, `Together`), payment methods (`Cash`, `BCA Debit`, `QRIS`), categories, the passcode-based auth, and the Google Sheet ID. That said, the foundation is designed to be extensible. Feel free to fork this repo and adapt these values to your own setup — most of them live in `app/lib/constants.ts` and `.env`.
+
 ### How it works
 
 ```mermaid
@@ -122,15 +124,15 @@ Follow these steps to configure Google Sheets as your datastore:
    | Timestamp | Item | Category | Amount | Method | Date | Source |
    | --------- | ---- | -------- | ------ | ------ | ---- | ------ |
 
-   | Column | Description | Example |
-   | ------ | ----------- | ------- |
-   | A - Timestamp | Auto-generated server timestamp (Asia/Jakarta) | `3/9/2026 14:05:32` |
-   | B - Item | Expense description | `Nasi goreng` |
-   | C - Category | One of: Food, Transport, Groceries, Utilities, Health, Entertainment, Shopping, Education, Other | `Food` |
-   | D - Amount | Amount in IDR (numeric) | `25000` |
-   | E - Method | One of: Cash, BCA Debit, QRIS | `QRIS` |
-   | F - Date | User-selected date (`M/D/YYYY`) | `3/9/2026` |
-   | G - Source | One of: Danny, Dewi, Together | `Danny` |
+   | Column        | Description                                                                                      | Example             |
+   | ------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
+   | A - Timestamp | Auto-generated server timestamp (Asia/Jakarta)                                                   | `3/9/2026 14:05:32` |
+   | B - Item      | Expense description                                                                              | `Nasi goreng`       |
+   | C - Category  | One of: Food, Transport, Groceries, Utilities, Health, Entertainment, Shopping, Education, Other | `Food`              |
+   | D - Amount    | Amount in IDR (numeric)                                                                          | `25000`             |
+   | E - Method    | One of: Cash, BCA Debit, QRIS                                                                    | `QRIS`              |
+   | F - Date      | User-selected date (`M/D/YYYY`)                                                                  | `3/9/2026`          |
+   | G - Source    | One of: Danny, Dewi, Together                                                                    | `Danny`             |
 
    > **Tip:** Create tabs for the next few months in advance so the app is always ready. The app reads all tabs matching the `YYYY-MM` pattern and shows the most recent first.
 
