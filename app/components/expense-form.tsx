@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { Form } from 'react-router';
 import { endOfMonth, format } from 'date-fns';
 import { CalendarIcon } from 'lucide-react';
-import { CATEGORIES, METHODS, SOURCES } from '~/lib/constants';
+import { METHODS, SOURCES } from '~/lib/constants';
 import { Calendar } from '~/components/ui/calendar';
 import {
   Popover,
@@ -13,6 +13,10 @@ import {
 import { cn } from '~/lib/utils';
 
 interface ExpenseFormProps {
+  title?: string;
+  categories: readonly string[];
+  submitLabel?: string;
+  sourceLabel?: string;
   errors?: Record<string, string>;
   isSubmitting?: boolean;
   amountRef?: RefObject<HTMLInputElement | null>;
@@ -53,10 +57,16 @@ function reducer(state: State, action: Action): State {
       return { ...state, calendarOpen: action.open };
     case 'set_amount':
       return { ...state, amount: formatAmount(action.value) };
+    default:
+      return state;
   }
 }
 
 export function ExpenseForm({
+  title,
+  categories,
+  submitLabel = 'Save Transaction',
+  sourceLabel = 'Source',
   errors,
   isSubmitting,
   amountRef,
@@ -72,17 +82,16 @@ export function ExpenseForm({
   });
 
   const maxDate = selectedMonth
-    ? endOfMonth(new Date(selectedMonth + '-01'))
+    ? endOfMonth(new Date(`${selectedMonth}-01`))
     : undefined;
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    if (isOnline) return; // Let RR7 handle it normally
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    if (isOnline) return;
 
     e.preventDefault();
     const form = e.currentTarget;
     const formData = new FormData(form);
 
-    // Basic client-side validation for offline entries
     const amount = formData.get('amount') as string;
     const category = formData.get('category') as string;
     const method = formData.get('method') as string;
@@ -90,25 +99,22 @@ export function ExpenseForm({
     const item = formData.get('item') as string;
     const date = formData.get('date') as string;
 
-    if (
-      !amount ||
-      !category ||
-      !method ||
-      !source ||
-      !item ||
-      !date
-    ) {
+    if (!amount || !category || !method || !source || !item || !date) {
       toast.error('Please fill in all required fields.');
       return;
     }
 
     const numAmount = Number(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
+    if (Number.isNaN(numAmount) || numAmount <= 0) {
       toast.error('Amount must be a positive number.');
       return;
     }
 
-    onOfflineSubmit?.(formData);
+    try {
+      await onOfflineSubmit?.(formData);
+    } catch {
+      toast.error('Failed to save offline entry.');
+    }
   }
 
   return (
@@ -117,20 +123,33 @@ export function ExpenseForm({
       className="flex flex-col gap-4 p-4"
       onSubmit={handleSubmit}
     >
+      {title ? (
+        <div className="space-y-1">
+          <h1 className="text-xl font-bold text-slate-900">{title}</h1>
+          <p className="text-sm text-slate-500">
+            Fill in the transaction details below.
+          </p>
+        </div>
+      ) : null}
+
       {selectedMonth && (
         <input type="hidden" name="month" value={selectedMonth} />
       )}
+
       {/* Amount */}
       <fieldset>
+        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+          Amount
+        </label>
         <div className="flex items-center gap-2 rounded-xl border-2 border-slate-200 px-4 py-3 focus-within:border-slate-900">
-          <span className="text-lg font-semibold text-slate-400">
-            IDR
-          </span>
+          <span className="text-lg font-semibold text-slate-400">IDR</span>
+
           <input
             type="hidden"
             name="amount"
             value={state.amount.replace(/,/g, '')}
           />
+
           <input
             ref={amountRef}
             type="text"
@@ -160,7 +179,7 @@ export function ExpenseForm({
         <input
           type="text"
           name="item"
-          placeholder="What did you buy?"
+          placeholder="What is this transaction for?"
           maxLength={100}
           className="w-full rounded-lg border-2 border-slate-200 px-4 py-3 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-slate-900"
         />
@@ -175,24 +194,22 @@ export function ExpenseForm({
           Category
         </label>
         <div className="grid grid-cols-3 gap-2">
-          {CATEGORIES.map((c) => (
-            <label key={c} className="cursor-pointer">
+          {categories.map((category) => (
+            <label key={category} className="cursor-pointer">
               <input
                 type="radio"
                 name="category"
-                value={c}
+                value={category}
                 className="peer sr-only"
               />
-              <div className="rounded-lg bg-slate-100 py-2 text-center text-xs font-medium text-slate-600 transition-colors peer-checked:bg-slate-900 peer-checked:text-white">
-                {c}
+              <div className="rounded-lg bg-slate-100 px-2 py-2 text-center text-xs font-medium text-slate-600 transition-colors peer-checked:bg-slate-900 peer-checked:text-white">
+                {category}
               </div>
             </label>
           ))}
         </div>
         {errors?.category && (
-          <p className="mt-1 text-xs text-red-500">
-            {errors.category}
-          </p>
+          <p className="mt-1 text-xs text-red-500">{errors.category}</p>
         )}
       </fieldset>
 
@@ -202,16 +219,16 @@ export function ExpenseForm({
           Payment Method
         </label>
         <div className="grid grid-cols-3 gap-2">
-          {METHODS.map((m) => (
-            <label key={m} className="cursor-pointer">
+          {METHODS.map((method) => (
+            <label key={method} className="cursor-pointer">
               <input
                 type="radio"
                 name="method"
-                value={m}
+                value={method}
                 className="peer sr-only"
               />
-              <div className="rounded-lg bg-slate-100 py-2 text-center text-xs font-medium text-slate-600 transition-colors peer-checked:bg-slate-900 peer-checked:text-white">
-                {m}
+              <div className="rounded-lg bg-slate-100 px-2 py-2 text-center text-xs font-medium text-slate-600 transition-colors peer-checked:bg-slate-900 peer-checked:text-white">
+                {method}
               </div>
             </label>
           ))}
@@ -226,11 +243,9 @@ export function ExpenseForm({
         <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
           Date
         </label>
-        <input
-          type="hidden"
-          name="date"
-          value={toDateString(state.date)}
-        />
+
+        <input type="hidden" name="date" value={toDateString(state.date)} />
+
         <Popover
           open={state.calendarOpen}
           onOpenChange={(open) =>
@@ -251,6 +266,7 @@ export function ExpenseForm({
               </span>
             </button>
           </PopoverTrigger>
+
           <PopoverContent align="start" className="w-auto">
             <Calendar
               mode="single"
@@ -264,6 +280,7 @@ export function ExpenseForm({
             />
           </PopoverContent>
         </Popover>
+
         {errors?.date && (
           <p className="mt-1 text-xs text-red-500">{errors.date}</p>
         )}
@@ -272,20 +289,20 @@ export function ExpenseForm({
       {/* Source */}
       <fieldset>
         <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-          Paid from
+          {sourceLabel}
         </label>
         <div className="grid grid-cols-3 gap-2">
-          {SOURCES.map((s) => (
-            <label key={s} className="cursor-pointer">
+          {SOURCES.map((source) => (
+            <label key={source} className="cursor-pointer">
               <input
                 type="radio"
                 name="source"
-                value={s}
-                defaultChecked={s === (defaultSource ?? 'Danny')}
+                value={source}
+                defaultChecked={source === (defaultSource ?? SOURCES[0])}
                 className="peer sr-only"
               />
-              <div className="rounded-lg bg-slate-100 py-2 text-center text-xs font-medium text-slate-600 transition-colors peer-checked:bg-slate-900 peer-checked:text-white">
-                {s}
+              <div className="rounded-lg bg-slate-100 px-2 py-2 text-center text-xs font-medium text-slate-600 transition-colors peer-checked:bg-slate-900 peer-checked:text-white">
+                {source}
               </div>
             </label>
           ))}
@@ -299,7 +316,7 @@ export function ExpenseForm({
       <button
         type="submit"
         disabled={isSubmitting}
-        className="w-full rounded-xl bg-slate-900 py-3 text-sm font-semibold text-white transition-opacity disabled:opacity-50 mt-4"
+        className="mt-4 w-full rounded-xl bg-slate-900 py-3 text-sm font-semibold text-white transition-opacity disabled:opacity-50"
       >
         {isSubmitting ? (
           <span className="inline-flex items-center gap-2">
@@ -325,7 +342,7 @@ export function ExpenseForm({
             Saving...
           </span>
         ) : isOnline ? (
-          'Save Expense'
+          submitLabel
         ) : (
           'Save Offline'
         )}

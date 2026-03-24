@@ -1,4 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+import {
+  useEffect,
+  useState,
+  useCallback,
+  type ReactNode,
+} from 'react';
 import {
   isRouteErrorResponse,
   Links,
@@ -33,7 +38,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return { isAuthenticated: await isAuthenticated(request) };
 }
 
-export function Layout({ children }: { children: React.ReactNode }) {
+export function Layout({ children }: { children: ReactNode }) {
   const [swUpdate, setSwUpdate] = useState(false);
   const [waitingWorker, setWaitingWorker] =
     useState<ServiceWorker | null>(null);
@@ -41,50 +46,48 @@ export function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
 
-    navigator.serviceWorker
-      .register('/sw.js')
-      .then((registration) => {
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          if (!newWorker) return;
+    navigator.serviceWorker.register('/sw.js').then((registration) => {
+      registration.addEventListener('updatefound', () => {
+        const newWorker = registration.installing;
+        if (!newWorker) return;
 
-          newWorker.addEventListener('statechange', () => {
-            if (
-              newWorker.state === 'installed' &&
-              navigator.serviceWorker.controller
-            ) {
-              setWaitingWorker(newWorker);
-              setSwUpdate(true);
-            }
-          });
+        newWorker.addEventListener('statechange', () => {
+          if (
+            newWorker.state === 'installed' &&
+            navigator.serviceWorker.controller
+          ) {
+            setWaitingWorker(newWorker);
+            setSwUpdate(true);
+          }
         });
-
-        if (
-          registration.waiting &&
-          navigator.serviceWorker.controller
-        ) {
-          setWaitingWorker(registration.waiting);
-          setSwUpdate(true);
-        }
       });
+
+      if (
+        registration.waiting &&
+        navigator.serviceWorker.controller
+      ) {
+        setWaitingWorker(registration.waiting);
+        setSwUpdate(true);
+      }
+    });
   }, []);
 
   const handleUpdate = useCallback(() => {
-    if (waitingWorker) {
-      waitingWorker.postMessage({ type: 'SKIP_WAITING' });
-      setSwUpdate(false);
+    if (!waitingWorker) return;
 
-      if ('serviceWorker' in navigator && navigator.serviceWorker) {
-        navigator.serviceWorker.addEventListener(
-          'controllerchange',
-          () => {
-            window.location.reload();
-          },
-          { once: true },
-        );
-      } else {
-        window.location.reload();
-      }
+    waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+    setSwUpdate(false);
+
+    if ('serviceWorker' in navigator && navigator.serviceWorker) {
+      navigator.serviceWorker.addEventListener(
+        'controllerchange',
+        () => {
+          window.location.reload();
+        },
+        { once: true },
+      );
+    } else {
+      window.location.reload();
     }
   }, [waitingWorker]);
 
@@ -97,6 +100,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           content="width=device-width, initial-scale=1, viewport-fit=cover"
         />
         <meta name="theme-color" content="#0f172a" />
+        <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta
           name="apple-mobile-web-app-status-bar-style"
@@ -112,7 +116,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {swUpdate && (
           <button
             onClick={handleUpdate}
-            className="fixed top-4 left-1/2 z-[100] -translate-x-1/2 rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-lg"
+            className="fixed left-1/2 top-4 z-[100] -translate-x-1/2 rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-lg"
           >
             Update available — tap to refresh
           </button>
@@ -126,6 +130,37 @@ export function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+function NavItem({
+  to,
+  label,
+  end = false,
+  children,
+}: {
+  to: string;
+  label: string;
+  end?: boolean;
+  children: (isActive: boolean) => ReactNode;
+}) {
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      className={({ isActive }) =>
+        `flex min-w-0 flex-1 flex-col items-center gap-0.5 px-2 py-2 text-[11px] ${
+          isActive ? 'font-bold text-slate-900' : 'text-slate-400'
+        }`
+      }
+    >
+      {({ isActive }) => (
+        <>
+          {children(isActive)}
+          <span>{label}</span>
+        </>
+      )}
+    </NavLink>
+  );
+}
+
 export default function App() {
   const { isAuthenticated } = useLoaderData<typeof loader>();
 
@@ -136,72 +171,96 @@ export default function App() {
           isAuthenticated
             ? {
                 paddingBottom:
-                  'calc(4rem + env(safe-area-inset-bottom, 0.5rem))',
+                  'calc(4.5rem + env(safe-area-inset-bottom, 0.5rem))',
               }
             : undefined
         }
       >
         <Outlet />
       </div>
+
       {isAuthenticated && (
         <nav
-          className="fixed bottom-0 left-0 right-0 z-50 mx-auto flex max-w-md items-center justify-around border-t border-slate-200 bg-white py-3"
+          className="fixed bottom-0 left-0 right-0 z-50 mx-auto flex max-w-md items-center justify-around border-t border-slate-200 bg-white py-2"
           style={{
             paddingBottom: 'env(safe-area-inset-bottom, 0.5rem)',
           }}
         >
-          <NavLink
-            to="/"
-            end
-            className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-4 py-2 text-xs ${isActive ? 'font-bold text-slate-900' : 'text-slate-400'}`
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <svg
-                  width="22"
-                  height="22"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={isActive ? 2.5 : 2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="16" />
-                  <line x1="8" y1="12" x2="16" y2="12" />
-                </svg>
-                <span>Add</span>
-              </>
+          <NavItem to="/" end label="Expense">
+            {(isActive) => (
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={isActive ? 2.5 : 2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="16" />
+                <line x1="8" y1="12" x2="16" y2="12" />
+              </svg>
             )}
-          </NavLink>
-          <NavLink
-            to="/history"
-            className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-4 py-2 text-xs ${isActive ? 'font-bold text-slate-900' : 'text-slate-400'}`
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <svg
-                  width="22"
-                  height="22"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={isActive ? 2.5 : 2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-                <span>History</span>
-              </>
+          </NavItem>
+
+          <NavItem to="/income" label="Income">
+            {(isActive) => (
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={isActive ? 2.5 : 2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 19V5" />
+                <path d="M5 12l7-7 7 7" />
+              </svg>
             )}
-          </NavLink>
+          </NavItem>
+
+          <NavItem to="/savings" label="Savings">
+            {(isActive) => (
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={isActive ? 2.5 : 2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M20 7H4" />
+                <path d="M6 7V6a2 2 0 012-2h8a2 2 0 012 2v1" />
+                <path d="M6 11h12" />
+                <path d="M8 15h4" />
+                <rect x="3" y="7" width="18" height="13" rx="2" />
+              </svg>
+            )}
+          </NavItem>
+
+          <NavItem to="/history" label="History">
+            {(isActive) => (
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={isActive ? 2.5 : 2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            )}
+          </NavItem>
         </nav>
       )}
     </>

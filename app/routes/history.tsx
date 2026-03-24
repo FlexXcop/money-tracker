@@ -17,6 +17,7 @@ import { MonthSelector } from '~/components/month-selector';
 import { getPendingCount } from '~/lib/offline-queue';
 import { syncPendingExpenses } from '~/lib/sync';
 import { toast } from 'sonner';
+import { SOURCES, TRANSACTION_TYPES } from '~/lib/constants';
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireAuth(request);
@@ -43,6 +44,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   try {
     const LIMIT = 20;
     const rows = await getExpensesByMonth(activeMonth, LIMIT);
+
     const entries: ExpenseEntry[] = rows.map((row) => ({
       timestamp: row[0] ?? '',
       item: row[1] ?? '',
@@ -51,16 +53,132 @@ export async function loader({ request }: Route.LoaderArgs) {
       method: row[4] ?? '',
       date: row[5] ?? '',
       source: row[6] ?? '',
+      type: (row[7] as 'Expense' | 'Income' | 'Savings') || 'Expense',
     }));
-    return data({ entries, activeMonth, months });
+
+    return data({
+      entries,
+      activeMonth,
+      months,
+    });
   } catch {
     return data({
       entries: [] as ExpenseEntry[],
       activeMonth,
       months,
-      error: 'Failed to load expenses',
+      error: 'Failed to load transactions',
     });
   }
+}
+
+type State = {
+  sourceFilter: string;
+  typeFilter: string;
+  pendingCount: number;
+  isOnline: boolean;
+  isSyncing: boolean;
+  cachedEntries: ExpenseEntry[];
+};
+
+type Action =
+  | { type: 'SET_SOURCE_FILTER'; filter: string }
+  | { type: 'SET_TYPE_FILTER'; filter: string }
+  | { type: 'SET_PENDING_COUNT'; count: number }
+  | { type: 'SET_ONLINE'; online: boolean }
+  | { type: 'SET_SYNCING'; syncing: boolean }
+  | { type: 'SET_CACHED_ENTRIES'; entries: ExpenseEntry[] };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'SET_SOURCE_FILTER':
+      return { ...state, sourceFilter: action.filter };
+    case 'SET_TYPE_FILTER':
+      return { ...state, typeFilter: action.filter };
+    case 'SET_PENDING_COUNT':
+      return { ...state, pendingCount: action.count };
+    case 'SET_ONLINE':
+      return { ...state, isOnline: action.online };
+    case 'SET_SYNCING':
+      return { ...state, isSyncing: action.syncing };
+    case 'SET_CACHED_ENTRIES':
+      return { ...state, cachedEntries: action.entries };
+    default:
+      return state;
+  }
+}
+
+function formatIDR(value: number) {
+  return `IDR ${value.toLocaleString('id-ID')}`;
+}
+
+type Totals = {
+  income: number;
+  expense: number;
+  savings: number;
+};
+
+function calculateTotals(entries: ExpenseEntry[]): Totals {
+  return entries.reduce(
+    (acc, entry) => {
+      if (entry.type === 'Income') acc.income += entry.amount;
+      if (entry.type === 'Expense') acc.expense += entry.amount;
+      if (entry.type === 'Savings') acc.savings += entry.amount;
+      return acc;
+    },
+    { income: 0, expense: 0, savings: 0 },
+  );
+}
+
+function getActiveBalance(totals: Totals) {
+  return totals.income - totals.expense - totals.savings;
+}
+
+function SummaryCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: 'income' | 'expense' | 'savings' | 'balance';
+}) {
+  const activeBalancePositive = value >= 0;
+
+  const styles = {
+    income: {
+      wrapper: 'rounded-xl border border-emerald-200 bg-emerald-50 p-3',
+      label: 'text-xs text-emerald-700',
+      value: 'text-sm font-bold text-emerald-900',
+    },
+    expense: {
+      wrapper: 'rounded-xl border border-rose-200 bg-rose-50 p-3',
+      label: 'text-xs text-rose-700',
+      value: 'text-sm font-bold text-rose-900',
+    },
+    savings: {
+      wrapper: 'rounded-xl border border-blue-200 bg-blue-50 p-3',
+      label: 'text-xs text-blue-700',
+      value: 'text-sm font-bold text-blue-900',
+    },
+    balance: activeBalancePositive
+      ? {
+          wrapper: 'rounded-xl border border-slate-900 bg-slate-900 p-3',
+          label: 'text-xs text-slate-300',
+          value: 'text-sm font-bold text-white',
+        }
+      : {
+          wrapper: 'rounded-xl border border-amber-300 bg-amber-50 p-3',
+          label: 'text-xs text-amber-700',
+          value: 'text-sm font-bold text-amber-900',
+        },
+  }[tone];
+
+  return (
+    <div className={styles.wrapper}>
+      <p className={styles.label}>{label}</p>
+      <p className={styles.value}>{formatIDR(value)}</p>
+    </div>
+  );
 }
 
 export default function History() {
@@ -74,39 +192,23 @@ export default function History() {
   const months = loaderData.months as string[];
   const navigate = useNavigate();
 
-  type State = {
-    sourceFilter: string;
-    pendingCount: number;
-    isOnline: boolean;
-    isSyncing: boolean;
-    cachedEntries: ExpenseEntry[];
-  };
-  type Action =
-    | { type: 'SET_SOURCE_FILTER'; filter: string }
-    | { type: 'SET_PENDING_COUNT'; count: number }
-    | { type: 'SET_ONLINE'; online: boolean }
-    | { type: 'SET_SYNCING'; syncing: boolean }
-    | { type: 'SET_CACHED_ENTRIES'; entries: ExpenseEntry[] };
+  const [state, dispatch] = useReducer(reducer, {
+    sourceFilter: 'All',
+    typeFilter: 'All',
+    pendingCount: 0,
+    isOnline: true,
+    isSyncing: false,
+    cachedEntries: [],
+  });
 
-  const [state, dispatch] = useReducer(
-    (s: State, a: Action): State => {
-      switch (a.type) {
-        case 'SET_SOURCE_FILTER': return { ...s, sourceFilter: a.filter };
-        case 'SET_PENDING_COUNT': return { ...s, pendingCount: a.count };
-        case 'SET_ONLINE': return { ...s, isOnline: a.online };
-        case 'SET_SYNCING': return { ...s, isSyncing: a.syncing };
-        case 'SET_CACHED_ENTRIES': return { ...s, cachedEntries: a.entries };
-      }
-    },
-    {
-      sourceFilter: 'All',
-      pendingCount: 0,
-      isOnline: true,
-      isSyncing: false,
-      cachedEntries: [],
-    },
-  );
-  const { sourceFilter, pendingCount, isOnline, isSyncing, cachedEntries } = state;
+  const {
+    sourceFilter,
+    typeFilter,
+    pendingCount,
+    isOnline,
+    isSyncing,
+    cachedEntries,
+  } = state;
 
   const refreshPendingCount = useCallback(async () => {
     try {
@@ -121,62 +223,72 @@ export default function History() {
     dispatch({ type: 'SET_ONLINE', online: navigator.onLine });
     refreshPendingCount();
 
-    const handleOnline = () => dispatch({ type: 'SET_ONLINE', online: true });
-    const handleOffline = () => dispatch({ type: 'SET_ONLINE', online: false });
+    const handleOnline = () =>
+      dispatch({ type: 'SET_ONLINE', online: true });
+    const handleOffline = () =>
+      dispatch({ type: 'SET_ONLINE', online: false });
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, [refreshPendingCount]);
 
-  // Persist entries to localStorage when loaded successfully
   useEffect(() => {
     if (isOffline || entries.length === 0) return;
+
     try {
       localStorage.setItem(
         `duitlog-history-${activeMonth}`,
         JSON.stringify(entries),
       );
     } catch {
-      // Storage quota exceeded or unavailable
+      // localStorage unavailable
     }
   }, [entries, activeMonth, isOffline]);
 
-  // Load cached entries from localStorage when offline
   useEffect(() => {
     if (!isOffline) return;
+
     try {
       const cached = localStorage.getItem(`duitlog-history-${activeMonth}`);
       if (cached) {
-        dispatch({ type: 'SET_CACHED_ENTRIES', entries: JSON.parse(cached) });
+        dispatch({
+          type: 'SET_CACHED_ENTRIES',
+          entries: JSON.parse(cached) as ExpenseEntry[],
+        });
       }
     } catch {
       // localStorage unavailable
     }
   }, [isOffline, activeMonth]);
 
-  // Auto-sync when online with pending entries
   useEffect(() => {
     if (!isOnline || pendingCount === 0 || isSyncing) return;
+    if (typeof window !== 'undefined' && 'SyncManager' in window) return;
 
     dispatch({ type: 'SET_SYNCING', syncing: true });
+
     syncPendingExpenses((synced, total) => {
       dispatch({ type: 'SET_PENDING_COUNT', count: total - synced });
     })
       .then(({ synced, failed }) => {
         refreshPendingCount();
+
         if (synced > 0) {
           toast.success(
-            `Synced ${synced} expense${synced > 1 ? 's' : ''} to Google Sheets${failed > 0 ? ` (${failed} failed)` : ''}`,
+            `Synced ${synced} transaction${synced > 1 ? 's' : ''} to Google Sheets${failed > 0 ? ` (${failed} failed)` : ''}`,
           );
         }
       })
-      .catch((error) => {
-        console.error('Failed to sync pending expenses', error);
-        toast.error('Failed to sync pending expenses. Please try again.');
+      .catch((syncError) => {
+        console.error('Failed to sync pending transactions', syncError);
+        toast.error(
+          'Failed to sync pending transactions. Please try again.',
+        );
       })
       .finally(() => {
         dispatch({ type: 'SET_SYNCING', syncing: false });
@@ -187,18 +299,31 @@ export default function History() {
     navigate(`/history?month=${month}`);
   }
 
-  const displayEntries = isOffline && cachedEntries.length > 0 ? cachedEntries : entries;
+  const displayEntries =
+    isOffline && cachedEntries.length > 0 ? cachedEntries : entries;
   const isShowingCached = isOffline && cachedEntries.length > 0;
-  const filtered =
-    sourceFilter === 'All'
-      ? displayEntries
-      : displayEntries.filter((e) => e.source === sourceFilter);
+
+  const filtered = displayEntries.filter((entry) => {
+    const sourceMatch =
+      sourceFilter === 'All' || entry.source === sourceFilter;
+    const typeMatch = typeFilter === 'All' || entry.type === typeFilter;
+    return sourceMatch && typeMatch;
+  });
+
+  const monthlyTotals = calculateTotals(displayEntries);
+  const filteredTotals = calculateTotals(filtered);
+
+  const monthlyActiveBalance = getActiveBalance(monthlyTotals);
+  const filteredActiveBalance = getActiveBalance(filteredTotals);
+
+  const hasActiveFilter =
+    sourceFilter !== 'All' || typeFilter !== 'All';
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col bg-white">
-      <header className="flex justify-between items-center shrink-0 px-4 pt-[max(1.5rem,env(safe-area-inset-top))] pb-2">
+      <header className="flex shrink-0 items-center justify-between px-4 pb-2 pt-[max(1.5rem,env(safe-area-inset-top))]">
         <h1 className="text-xl font-bold tracking-tight text-slate-900">
-          Recent Expenses
+          Recent Transactions
         </h1>
         <div className="mt-2">
           <MonthSelector
@@ -222,25 +347,112 @@ export default function History() {
           <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-xs font-bold text-white">
             {pendingCount}
           </span>
-          {isSyncing ? 'Syncing...' : `pending expense${pendingCount > 1 ? 's' : ''} — not yet in history`}
+          {isSyncing
+            ? 'Syncing...'
+            : `pending transaction${pendingCount > 1 ? 's' : ''} — not yet in history`}
         </div>
       )}
 
-      <div className="grid grid-cols-4 gap-1 px-4 pb-2">
-        {['All', 'Danny', 'Dewi', 'Together'].map((s) => (
+      <div className="flex flex-wrap gap-2 px-4 pb-2">
+        {['All', ...SOURCES].map((source) => (
           <button
-            key={s}
-            onClick={() => dispatch({ type: 'SET_SOURCE_FILTER', filter: s })}
-            className={`rounded-lg py-1.5 text-xs font-medium transition-colors ${
-              sourceFilter === s
+            key={source}
+            onClick={() =>
+              dispatch({ type: 'SET_SOURCE_FILTER', filter: source })
+            }
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              sourceFilter === source
                 ? 'bg-slate-900 text-white'
                 : 'bg-slate-100 text-slate-600'
             }`}
           >
-            {s}
+            {source}
           </button>
         ))}
       </div>
+
+      <div className="flex flex-wrap gap-2 px-4 pb-2">
+        {['All', ...TRANSACTION_TYPES].map((transactionType) => (
+          <button
+            key={transactionType}
+            onClick={() =>
+              dispatch({
+                type: 'SET_TYPE_FILTER',
+                filter: transactionType,
+              })
+            }
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              typeFilter === transactionType
+                ? 'bg-slate-900 text-white'
+                : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {transactionType}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 px-4 pb-3">
+        <SummaryCard
+          label="Income"
+          value={monthlyTotals.income}
+          tone="income"
+        />
+        <SummaryCard
+          label="Expense"
+          value={monthlyTotals.expense}
+          tone="expense"
+        />
+        <SummaryCard
+          label="Savings"
+          value={monthlyTotals.savings}
+          tone="savings"
+        />
+        <SummaryCard
+          label="Active Balance"
+          value={monthlyActiveBalance}
+          tone="balance"
+        />
+      </div>
+
+      {hasActiveFilter && (
+        <div className="px-4 pb-3">
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Filtered Summary
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {sourceFilter !== 'All' ? sourceFilter : 'All sources'} ·{' '}
+                {typeFilter !== 'All' ? typeFilter : 'All types'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <SummaryCard
+                label="Income"
+                value={filteredTotals.income}
+                tone="income"
+              />
+              <SummaryCard
+                label="Expense"
+                value={filteredTotals.expense}
+                tone="expense"
+              />
+              <SummaryCard
+                label="Savings"
+                value={filteredTotals.savings}
+                tone="savings"
+              />
+              <SummaryCard
+                label="Active Balance"
+                value={filteredActiveBalance}
+                tone="balance"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && <p className="px-4 text-sm text-red-600">{error}</p>}
 
@@ -248,19 +460,25 @@ export default function History() {
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
           <span className="text-5xl">🧾</span>
           <p className="text-lg font-semibold text-slate-700">
-            {isOffline ? 'No cached history for this month' : 'No expenses yet'}
+            {displayEntries.length > 0
+              ? 'No transactions match this filter'
+              : isOffline
+                ? 'No cached history for this month'
+                : 'No transactions yet'}
           </p>
           <p className="text-sm text-slate-400">
-            {isOffline
-              ? 'Visit this month while online to cache it.'
-              : 'Start logging your expenses from the Add tab.'}
+            {displayEntries.length > 0
+              ? 'Try changing the source or type filter above.'
+              : isOffline
+                ? 'Visit this month while online to cache it.'
+                : 'Start logging your transactions from the tabs above.'}
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-2 px-4 pt-2 pb-4">
-          {filtered.map((entry, i) => (
+        <div className="flex flex-col gap-2 px-4 pb-4 pt-2">
+          {filtered.map((entry, index) => (
             <ExpenseCard
-              key={`${entry.timestamp}-${i}`}
+              key={`${entry.timestamp}-${entry.item}-${index}`}
               entry={entry}
             />
           ))}
@@ -272,14 +490,11 @@ export default function History() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  const isDev =
-    typeof process !== 'undefined' &&
-    process.env &&
-    process.env.NODE_ENV === 'development';
+
   const message = isRouteErrorResponse(error)
     ? error.statusText || 'Something went wrong'
     : error instanceof Error
-      ? isDev
+      ? import.meta.env.DEV
         ? error.message
         : 'Something went wrong'
       : 'Something went wrong';

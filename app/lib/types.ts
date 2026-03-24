@@ -6,4 +6,5 @@ export interface ExpenseEntry {
   method: string;
   date: string;
   source: string;
+  type: 'Expense' | 'Income' | 'Savings';
 }

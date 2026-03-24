@@ -7,12 +7,12 @@ import {
   useRouteError,
   isRouteErrorResponse,
 } from 'react-router';
-import type { Route } from './+types/_index';
+import type { Route } from './+types/income';
 import {
   appendExpense,
   getAvailableMonths,
 } from '~/lib/sheets.server';
-import { expenseSchema } from '~/lib/validation';
+import { incomeSchema } from '~/lib/validation';
 import { ExpenseForm } from '~/components/expense-form';
 import { MonthSelector } from '~/components/month-selector';
 import { log } from '~/lib/logger.server';
@@ -29,7 +29,7 @@ import {
   registerBackgroundSync,
 } from '~/lib/offline-queue';
 import { syncPendingExpenses } from '~/lib/sync';
-import { EXPENSE_CATEGORIES } from '~/lib/constants';
+import { INCOME_CATEGORIES } from '~/lib/constants';
 
 function formatMonthLabel(month: string): string {
   const date = new Date(month + '-01');
@@ -87,6 +87,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   await requireAuth(request);
   const formData = await request.formData();
+
   const raw = {
     month: formData.get('month') as string,
     item: formData.get('item') as string,
@@ -97,7 +98,7 @@ export async function action({ request }: Route.ActionArgs) {
     source: formData.get('source') as string,
   };
 
-  const result = expenseSchema.safeParse(raw);
+  const result = incomeSchema.safeParse(raw);
 
   if (!result.success) {
     const fieldErrors: Record<string, string> = {};
@@ -112,7 +113,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   const parsed = result.data;
 
-  // Verify the target month tab exists (skip when offline — appendExpense will fail gracefully)
+  // Verify the target month tab exists
   try {
     const availableMonths = await getAvailableMonths();
     if (!availableMonths.includes(parsed.month)) {
@@ -125,42 +126,34 @@ export async function action({ request }: Route.ActionArgs) {
       });
     }
   } catch (err) {
+    // Allow offline/network-failure flow to continue
     if (!isNetworkError(err)) throw err;
-    // Offline — skip verification and let appendExpense attempt (and fail) below
   }
 
   const now = new Date();
   const jakartaDate = new Date(
     now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }),
   );
+
   const timestamp = `${jakartaDate.getMonth() + 1}/${jakartaDate.getDate()}/${jakartaDate.getFullYear()} ${String(jakartaDate.getHours()).padStart(2, '0')}:${String(jakartaDate.getMinutes()).padStart(2, '0')}:${String(jakartaDate.getSeconds()).padStart(2, '0')}`;
 
   const [year, month, day] = parsed.date.split('-');
   const formattedDate = `${Number(month)}/${Number(day)}/${year}`;
 
-  // const row = [
-  //   timestamp, // Timestamp
-  //   parsed.item, // Item
-  //   parsed.category, // Category
-  //   String(parsed.amount), // Amount (IDR)
-  //   parsed.method, // Payment Method
-  //   formattedDate, // Date
-  //   parsed.source, // Source
-  // ];
-
   const row = [
-  timestamp,
-  parsed.item,
-  parsed.category,
-  String(parsed.amount),
-  parsed.method,
-  formattedDate,
-  parsed.source,
-  'Expense',
-];
+    timestamp,
+    parsed.item,
+    parsed.category,
+    String(parsed.amount),
+    parsed.method,
+    formattedDate,
+    parsed.source,
+    'Income',
+  ];
 
   try {
     await appendExpense(parsed.month, row);
+
     const headers = new Headers();
     headers.append(
       'Set-Cookie',
@@ -170,6 +163,7 @@ export async function action({ request }: Route.ActionArgs) {
       'Set-Cookie',
       await selectedSourceCookie.serialize(parsed.source),
     );
+
     return data(
       {
         success: true as const,
@@ -201,20 +195,22 @@ export async function action({ request }: Route.ActionArgs) {
         },
       });
     }
-    log('error', 'action_append_error', {
+
+    log('error', 'action_append_income_error', {
       error: (err as Error).message,
     });
+
     return data(
       {
         success: false as const,
-        error: 'Failed to save. Please try again.',
+        error: 'Failed to save income. Please try again.',
       },
       { status: 500 },
     );
   }
 }
 
-export default function Index() {
+export default function IncomePage() {
   const { months, activeMonth, defaultSource } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>() as
@@ -230,7 +226,6 @@ export default function Index() {
   const [pendingCount, setPendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Track online/offline status
   useEffect(() => {
     setIsOnline(navigator.onLine);
 
@@ -239,19 +234,19 @@ export default function Index() {
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
-  // Load pending count on mount
   const refreshPendingCount = useCallback(async () => {
     try {
       const count = await getPendingCount();
       setPendingCount(count);
     } catch {
-      // IndexedDB not available
+      // IndexedDB may be unavailable
     }
   }, []);
 
@@ -259,15 +254,12 @@ export default function Index() {
     refreshPendingCount();
   }, [refreshPendingCount]);
 
-  // Auto-sync when coming back online
-  // Skip when SyncManager is available — the SW Background Sync owns it then,
-  // preventing concurrent submissions of the same queued entry.
   useEffect(() => {
     if (!isOnline || pendingCount === 0 || isSyncing) return;
-    if (typeof window !== 'undefined' && 'SyncManager' in window)
-      return;
+    if (typeof window !== 'undefined' && 'SyncManager' in window) return;
 
     setIsSyncing(true);
+
     syncPendingExpenses((synced, total) => {
       setPendingCount(total - synced);
     })
@@ -275,15 +267,14 @@ export default function Index() {
         refreshPendingCount();
         if (synced > 0) {
           toast.success(
-            `Synced ${synced} expense${synced > 1 ? 's' : ''} to Google Sheets${failed > 0 ? ` (${failed} failed)` : ''}`,
+            `Synced ${synced} transaction${synced > 1 ? 's' : ''} to Google Sheets${failed > 0 ? ` (${failed} failed)` : ''}`,
           );
         }
       })
       .catch((error) => {
-        // Ensure the user is informed when background sync fails
-        console.error('Failed to sync pending expenses', error);
+        console.error('Failed to sync pending transactions', error);
         toast.error(
-          'Failed to sync pending expenses. They will be retried automatically when possible.',
+          'Failed to sync pending transactions. They will be retried automatically when possible.',
         );
       })
       .finally(() => {
@@ -291,7 +282,6 @@ export default function Index() {
       });
   }, [isOnline, pendingCount, isSyncing, refreshPendingCount]);
 
-  // Listen for SW sync-complete message
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
 
@@ -302,29 +292,31 @@ export default function Index() {
     };
 
     navigator.serviceWorker.addEventListener('message', handler);
-    return () =>
+
+    return () => {
       navigator.serviceWorker.removeEventListener('message', handler);
+    };
   }, [refreshPendingCount]);
 
-  // Handle action response
   useEffect(() => {
     if (!actionData) return;
 
     if (actionData.success) {
       const monthLabel = formatMonthLabel(actionData.entry.month);
       toast.success(
-        `Saved to ${monthLabel}: ${actionData.entry.item} — IDR ${actionData.entry.amount.toLocaleString()}`,
+        `Saved income to ${monthLabel}: ${actionData.entry.item} — IDR ${actionData.entry.amount.toLocaleString()}`,
       );
+
       if (
         typeof navigator !== 'undefined' &&
         typeof navigator.vibrate === 'function'
       ) {
         navigator.vibrate(50);
       }
+
       setFormKey((k) => k + 1);
       setTimeout(() => amountRef.current?.focus(), 100);
     } else if ('networkError' in actionData && actionData.networkError) {
-      // Server couldn't reach Sheets — fall back to offline queue
       const fd = new FormData();
       Object.entries(actionData.pendingData).forEach(([k, v]) =>
         fd.set(k, String(v)),
@@ -336,7 +328,6 @@ export default function Index() {
   }, [actionData]);
 
   function generateOfflineId(): string {
-    // Prefer native crypto.randomUUID when available, fall back to timestamp+random
     if (
       typeof crypto !== 'undefined' &&
       typeof crypto.randomUUID === 'function'
@@ -352,9 +343,8 @@ export default function Index() {
     );
   }
 
-  // Handle offline form submission
   async function handleOfflineSubmit(formData: FormData) {
-    const expense = {
+    const income = {
       id: generateOfflineId(),
       createdAt: new Date().toISOString(),
       formData: {
@@ -369,7 +359,7 @@ export default function Index() {
     };
 
     try {
-      await addPendingExpense(expense);
+      await addPendingExpense(income);
       await registerBackgroundSync();
       await refreshPendingCount();
 
@@ -391,9 +381,9 @@ export default function Index() {
       setFormKey((k) => k + 1);
       setTimeout(() => amountRef.current?.focus(), 100);
     } catch (error) {
-      console.error('Failed to save expense offline', error);
+      console.error('Failed to save income offline', error);
       toast.error(
-        'Could not save expense for offline use. Please try again or submit when back online.',
+        'Could not save income for offline use. Please try again or submit when back online.',
       );
     }
   }
@@ -405,7 +395,7 @@ export default function Index() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col bg-white">
-      <header className="px-4 flex justify-between items-center pt-[max(1.5rem,env(safe-area-inset-top))] pb-2 shrink-0">
+      <header className="flex shrink-0 items-center justify-between px-4 pb-2 pt-[max(1.5rem,env(safe-area-inset-top))]">
         <h1 className="text-xl font-bold tracking-tight text-slate-900">
           DuitLog
         </h1>
@@ -418,15 +408,13 @@ export default function Index() {
         </div>
       </header>
 
-      {/* Offline banner */}
       {!isOnline && (
         <div className="mx-4 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-800">
-          You're offline — expenses will be saved locally and synced
+          You're offline — income entries will be saved locally and synced
           when you reconnect.
         </div>
       )}
 
-      {/* Pending sync badge */}
       {pendingCount > 0 && (
         <div className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-center text-sm text-blue-800">
           <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-xs font-bold text-white">
@@ -434,16 +422,16 @@ export default function Index() {
           </span>
           {isSyncing
             ? 'Syncing...'
-            : `pending expense${pendingCount > 1 ? 's' : ''}`}
+            : `pending transaction${pendingCount > 1 ? 's' : ''}`}
         </div>
       )}
 
       <ExpenseForm
         key={formKey}
-        title="Add Expense"
-        categories={EXPENSE_CATEGORIES}
-        submitLabel="Save Expense"
-        sourceLabel="Paid from"
+        title="Add Income"
+        categories={INCOME_CATEGORIES}
+        submitLabel="Save Income"
+        sourceLabel="Received by"
         errors={errors}
         isSubmitting={isSubmitting}
         amountRef={amountRef}
@@ -459,6 +447,7 @@ export default function Index() {
 export function ErrorBoundary() {
   const error = useRouteError();
   const isDev = process.env.NODE_ENV === 'development';
+
   const message = isRouteErrorResponse(error)
     ? error.statusText || 'Something went wrong'
     : isDev && error instanceof Error
