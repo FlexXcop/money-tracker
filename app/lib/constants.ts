@@ -13,6 +13,7 @@ export const EXPENSE_CATEGORIES = [
   'Shopping',
   'Education',
   'Emergency',
+  'Apartment',
   'Other'
 ] as const;
 
@@ -22,6 +23,7 @@ export const INCOME_CATEGORIES = [
   'Reimburse',
   'Bonus',
   'Gift',
+  'Apartment',
   'Other',
 ] as const;
 
